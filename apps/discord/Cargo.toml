@@ -1,0 +1,38 @@
+[package]
+name = "discord"
+description = "Bullpen Discord bot: an HTTP/SSE client of the engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "discord"
+path = "src/main.rs"
+
+[dependencies]
+tokio.workspace = true
+futures.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+secrecy.workspace = true
+serenity.workspace = true
+reqwest.workspace = true
+figment.workspace = true
+dotenvy.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-opentelemetry.workspace = true
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+
+[lints]
+workspace = true

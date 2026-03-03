@@ -1,0 +1,14 @@
+target/
+.bullpen/
+**/*.rs.bk
+.env
+.env.*
+!.env.example
+.venv/
+uv.lock
+.vscode
+.idea
+*.log
+node_modules/
+apps/web/dist/
+

@@ -1,0 +1,318 @@
+# Bullpen settings, read by every app. BULLPEN_<SECTION>__<KEY> environment variables win.
+# Secrets and per-machine URLs live in .env. BULLPEN_CONFIG_FILE points to another file.
+
+[app]
+log_level = "info,discord=debug"
+
+# ---------------------------------------------------------------- the agent loop
+[agent]
+max_steps = 12
+max_model_retries = 2
+request_timeout_secs = 110            # below the bot engine.request_timeout_secs of 120
+tool_timeout_secs = 20
+confirmation_ttl_secs = 600
+model_slots = 2                # match llama-server --parallel
+model_queue_wait_secs = 30
+max_turns = 16                 # turns running at once
+turn_queue_wait_secs = 20      # longest a turn waits for a slot before it is refused as busy
+temperature = 0.6
+history_turns = 20
+memory_recall_limit = 10
+# Recall memory and the profile graph in channels others can read.
+recall_in_public = false
+
+# Prompt budgets in estimated tokens. A section budget over the total is rejected at boot.
+# Tool schemas count against prompt_budget_tokens and must fit in half of it.
+prompt_budget_tokens = 5500
+history_budget_tokens = 1000
+memory_budget_tokens = 300
+capabilities_budget_tokens = 600
+# Budget of the earlier agent message a reply quotes into the prompt.
+reply_budget_tokens = 200
+# Images of one message passed to the model.
+max_images = 4
+# Other files of one message copied into the sandbox workspace, their largest size,
+# and the hosts they are downloaded from.
+max_files = 4
+max_file_bytes = 2000000
+file_hosts = ["cdn.discordapp.com", "media.discordapp.net"]
+upload_preview_chars = 800       # characters of the start of an attached file's text put beside the question
+upload_match_chars = 2400        # characters of its passages that match the question
+upload_ocr_pages = 3             # pages of a scanned PDF read by OCR
+# PaddleOCR language scans are read in (en, ch, chinese_cht, japan, korean, ...). Tesseract,
+# the fallback when the sandbox image has no PaddleOCR, reads en and both Chinese scripts.
+upload_ocr_lang = "en"
+chars_per_token = 4
+# Fraction added to prompt_budget_tokens for the chat template. The sum with
+# model.max_tokens_without_thinking must fit one chat slot.
+prompt_estimate_headroom = 0.3
+
+retry_base_ms = 250
+retry_cap_ms = 8000
+max_span_value_chars = 32000
+# A tool result longer than this goes to the sandbox workspace, replaced by its head and path.
+# 0 keeps every result whole.
+tool_result_to_file_chars = 6000
+# Characters of arguments and result on a live progress line, and of reasoning on the thinking line.
+progress_detail_chars = 160
+progress_thought_chars = 600
+# Stream model calls to the watcher. stream_block_chars is the longest run held back
+# before a draft block is sent.
+stream = true
+stream_block_chars = 160
+
+# Whether a model call reasons before it answers. Reasoning shows on the thinking line, never in the answer.
+[agent.thinking]
+mode = "auto"                  # on, off, or auto
+# auto, first match: no tools offered, off; the latest tool call failed or returned nothing,
+# recover; a cue or over max_quick_chars, on; after tool results, after_tools; before any tool
+# has run, plan_searches; else off.
+after_tools = false
+max_quick_chars = 160
+plan_searches = false
+recover = true
+cues = ["why", "compare", "difference", "explain", "should i", "recommend", "plan", "pros and cons"]
+# Repeat without thinking a call that thought and returned no answer and no tool call.
+retry_without = true
+
+# ---------------------------------------------------------------- what the model is told
+# Changes here change the prompt hash. system_file overrides system, which overrides the built-in default.
+[prompt]
+# system_file = "prompts/bullpen.md"
+role_line = "The user is `{user}`. Roles: {roles}."
+role_line_no_roles = "The user is `{user}`. They hold no special roles."
+memory_header = "What you remember about this user:"
+capabilities_header = "What you can do. Each line is a name, how it runs, and what it does."
+# {date} is filled in at assembly.
+date_line = "Today is {date}. Quotes and news carry their own times; report the time a result gives, never today's date in its place."
+reply_header = "The user replied to this earlier message of yours. It is what they are answering, so read it as the immediate context of what they say next."
+# Closes a tool result cut to fit the prompt; {chars} is how much was left out.
+result_cut_line = "[{chars} more characters of this result were cut to fit. Call again more narrowly to read them.]"
+answer_only_line = "You have no tools on this step. Answer the user now in plain text from what you already have, or say what you could not find. Do not write a tool call."
+# Sent after a tool failed and run_sandbox was not tried. Empty turns it off.
+sandbox_retry_line = "A tool you called this turn failed. Read its error and fix the call: look up the symbol with market_search if it was wrong, or call run_sandbox to work from what you already have. Tell the user you could not get something only after that has been tried."
+# One line per attached file. {preview} is the start of its text, {matches} the best
+# matching passages, and {text_path} the full text.
+upload_line = "The user attached {name} ({kind}, {size}). Its text, {chars} characters, is at {text_path} in the sandbox workspace, session {session}; the file itself is at {path}. It begins:\n{preview}\n\nThe passages of it that hold the most words of the question:\n{matches}\n\nAnswer a question about this file from these passages, never from search results or memory. When they do not hold the answer, read more with run_sandbox in session {session}: rg -i -n -C 3 SUBJECT {text_path}, or sed -n START,ENDp {text_path} around a line number above."
+# An attached file with no extractable text.
+upload_raw_line = "The user attached {name} ({kind}, {size}). It is at {path} in the sandbox workspace, session {session}, and no text could be pulled from it automatically. Open it with run_sandbox in that session before you answer: file {path} says what it is, and python3 with pypdf, docx, openpyxl or pandas, or pdftoppm and then paddle-ocr (tesseract when it is missing) for a scan, reads it."
+upload_failed_line = "The user attached {name} ({kind}), but it could not be opened: {reason}. Say so if the question depends on it."
+utc_offset_hours = -5          # US Eastern standard time, where US exchanges trade
+
+# ---------------------------------------------------------------- the model
+# base_url and api_key are per-machine and live in .env.
+[model]
+name = "Qwen/Qwen3-4B-GGUF:Q4_K_M"
+# Token budget of a call that thinks, reasoning and answer together. With the prompt it
+# must fit one chat slot.
+max_tokens = 2560
+# Token budget of a call that does not think.
+max_tokens_without_thinking = 1024
+usd_per_m_prompt = 0.0
+usd_per_m_completion = 0.0
+
+# Sampling sent to the server; unset keys use server defaults.
+[model.sampling]
+top_p = 0.9
+top_k = 20
+min_p = 0.0
+presence_penalty = 1.0
+# repeat_penalty = 1.05
+# seed = 42
+
+# ---------------------------------------------------------------- what may run
+# Risk classes in order: read_public, read_authenticated, prepare_write, external_write,
+# destructive, forbidden.
+[policy]
+write_roles = ["MANAGE_GUILD"]
+allow_authenticated_reads = false
+confirm_from = "external_write"
+
+# Tool names never registered, whatever registers them.
+[tools]
+disabled = []
+
+# The classifier and graph agent, run after the turn. Enabled, each turn costs two extra model calls.
+[profile]
+enabled = true
+max_tokens = 512
+timeout_secs = 60
+# Withdraw a recorded fact a new fact for the same subject and relation contradicts. Costs a model call.
+reconcile = true
+min_confidence = 0.5           # extracted facts below this, or with an empty label, are dropped
+list_limit = 50               # nodes and relations POST /profile/list returns, each
+request_timeout_secs = 30      # budget for one /profile/list or /profile/forget call
+
+# Rule-based gate on extraction. Empty lists use the built-in ones.
+[profile.detector]
+subjects = []
+cues = []
+min_words = 4
+
+# run_sandbox: a command in an isolated container. With egress on it reaches only the egress proxy.
+# required = true refuses to boot without a container runtime; false runs without run_sandbox.
+[sandbox]
+enabled = true
+required = false
+runtime = "docker"
+image = "bullpen-sandbox:main"
+memory = "256m"
+cpus = "1"
+pids = 128
+timeout_secs = 20
+max_output_chars = 4000
+risk = "prepare_write"
+session_idle_secs = 900        # how long a named session stays up with nothing running
+max_sessions = 4               # sessions one user holds at once; a new one reaps the oldest
+max_sessions_total = 16        # session containers across every user; a new one reaps the least recently used
+max_running = 8                # commands running at once across every user; more wait for a slot
+instance = "default"           # names this engine's containers; give each engine on one runtime its own
+workspace_mb = 64
+recent_commands = 200          # commands kept for the console view of what the agent ran
+egress = true
+egress_network = "bullpen-sandbox"
+egress_proxy_image = "bullpen-sandbox-proxy:main"
+egress_proxy_name = "bullpen-sandbox-proxy"
+description = "Run a shell command in an isolated Linux environment. Reach for it for any arithmetic on prices, returns or positions, before you tell the user you could not work something out, and for any file the user attached or any tool result too long to read whole. It has python3 with requests, bs4, lxml, pandas, numpy, pypdf, docx, openpyxl, xlrd, PIL, yaml and markdown; pdftotext and pdftoppm for PDFs, and paddle-ocr (Baidu PaddleOCR; paddle-ocr --lang ch for Chinese) or tesseract for scans; curl, wget, jq, rg, sqlite3, file, unzip and the usual text tools. It can fetch public web pages over HTTP and HTTPS, for example to read a news story a result linked to. Files the user attached and long results from other tools are already in the workspace, and the prompt or the result names the path and session; read them here with rg, grep or python3."
+command_description = "The shell command to run."
+session_description = "Name a session to keep files in the workspace between calls. Reuse the same name to resume it. Results an earlier tool wrote to the workspace name the session they are in."
+
+# The gate every model response passes. denied_phrases block an answer wherever they appear.
+# protected_terms are removed from an answer as whole words; the registered tool names are added
+# to them at boot, so the agent cannot spill a tool name to a user.
+[guardrail]
+enabled = true
+denied_phrases = []
+protected_terms = []
+redaction = "[hidden]"
+max_answer_chars = 8000
+replacement = "I cannot answer that. Ask a moderator if you need help."
+
+# Replaces history past its budget with one summary turn. Off drops the oldest turns.
+[compaction]
+enabled = true
+max_tokens = 512
+# Share of agent.history_budget_tokens kept as recent turns. keep_share times it plus max_tokens must fit it.
+keep_share = 0.4
+temperature = 0.0
+timeout_secs = 30
+# instructions = "You compact a conversation..."
+
+# ---------------------------------------------------------------- MCP
+# Servers go in [[mcp.servers]] and are not settable from the environment. None is configured.
+[mcp]
+required_props_only = true
+max_output_chars = 6000
+max_schema_description_chars = 80
+max_tool_description_chars = 160
+
+# [[mcp.servers]]
+# name = "example"
+# url = "http://localhost:9000/mcp"
+# tools = []
+# required_props_only = true
+# tool_timeout_secs = 45
+# risks = { page_snapshot = "read_public" }   # per-tool class in place of the one derived from the name
+
+# One hosted MCP server whose annotations set each tool's risk, reached with a bearer token.
+# Set BULLPEN_MCP__HOSTED__URL (and BULLPEN_MCP__HOSTED__TOKEN) in .env to register its tools as
+# hosted_<name>. Read tools run for anyone; write tools need policy.write_roles and a confirmation.
+[mcp.hosted]
+tools = []                     # empty registers every tool the server lists
+# Tool name prefixes whose results belong to one user. Such a tool runs only in a direct
+# message, is ReadAuthenticated, and is sent the caller as user_id in place of the model's value.
+private = []
+
+# Market data over the Finnhub REST API: quotes, symbol search, company profiles and figures,
+# news, and exchange status. The key lives in .env as BULLPEN_MARKET__API_KEY; a free key comes
+# from https://finnhub.io/register. Every tool is a public read.
+[market]
+enabled = true
+base_url = "https://finnhub.io/api/v1"
+timeout_secs = 15
+max_items = 8                  # rows one list reply holds: symbols, stories
+news_days = 7                  # days of company news read back from today
+default_exchange = "US"        # exchange market_status reports when a call names none
+summary_chars = 280            # longest news summary kept
+
+# Wikipedia lookups over the MediaWiki API. Public, no key.
+[wikipedia]
+enabled = true
+base_url = "https://en.wikipedia.org/w/api.php"
+timeout_secs = 20
+max_chars = 1500
+
+# ---------------------------------------------------------------- traces
+[trace]
+enabled = true
+dir = ".bullpen/traces"
+max_file_bytes = 2000000       # later events of one request are dropped past this; 0 removes the limit
+retention_hours = 336          # pruned hourly; 0 keeps them forever
+
+# Spans export to Phoenix at phoenix_url plus /v1/traces. phoenix_url and phoenix_api_key
+# live in .env; an empty phoenix_url turns export off. project_name is the Phoenix project.
+[telemetry]
+project_name = "bullpen"
+sample_ratio = 1.0
+export_timeout_secs = 10
+provider_name = "llama.cpp"
+
+# Discord product events, one span each.
+[analytics]
+enabled = true
+
+# ---------------------------------------------------------------- the HTTP surface
+[http]
+max_body_bytes = 1048576
+concurrency_limit = 0          # 0 removes the limit
+rate_limit_per_min = 0         # per user, 0 removes the limit
+cors_origins = []              # ["*"] for the Vite dev server
+shutdown_grace_secs = 10
+
+# ---------------------------------------------------------------- the Discord bot
+[bot]
+channels = []                  # empty answers in every channel it can see
+max_message_chars = 2000       # the Discord hard limit
+edit_every_ms = 1500
+cooldown_secs = 0
+write_capability = "MANAGE_GUILD"
+thread_auto_archive_minutes = 1440   # 60, 1440, 4320, or 10080; threads the bot opens for answers
+# Direct messages get the profile graph and personal memory.
+direct_messages = true
+# Images of one message sent to the model; needs a vision model. 0 sends none.
+max_images = 4
+# Other files of one message sent to the engine, and their largest size.
+max_files = 4
+max_file_bytes = 2000000
+
+# ---------------------------------------------------------------- store
+# Conversations, memories, the profile graph and confirmations live in the store service
+# (apps/store) on Postgres. The engine reads url, token and timeout_secs; the store reads the
+# rest. url, token (shared by both) and database_url live in .env and are required.
+[store]
+timeout_secs = 10              # one engine call to the store
+bind = "127.0.0.1:8090"
+max_connections = 10
+acquire_timeout_secs = 5
+max_ttl_secs = 86400           # longest confirmation hold; agent.confirmation_ttl_secs fits inside
+max_limit = 1000               # most rows one read returns
+max_body_bytes = 4194304
+max_key_chars = 200            # longest tenant, user, channel, label or relation
+
+# ---------------------------------------------------------------- the developer console
+[cli]
+phoenix_url = "http://localhost:6006"
+log_lines = 5000
+log_dir = ".bullpen/logs"
+log_file_max_mb = 20           # a unit log past this is rotated to one .1 file
+log_line_chars = 4000          # longest line kept from a unit's output
+health_interval_secs = 5
+port_check_ms = 150
+
+# ---------------------------------------------------------------- evals
+# engine_url and engine_service_token live in .env.
+[evals]
+state_dir = "../../.bullpen"
+cases_dir = "cases"
+baseline_path = "baseline.json"
+request_timeout_secs = 180.0
