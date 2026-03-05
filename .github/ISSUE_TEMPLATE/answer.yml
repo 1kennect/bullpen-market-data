@@ -1,0 +1,29 @@
+name: Wrong answer
+description: Bullpen gave a wrong price, figure, or headline, or cited the wrong thing
+labels: [answer]
+body:
+  - type: textarea
+    id: asked
+    attributes:
+      label: What you asked
+    validations:
+      required: true
+  - type: textarea
+    id: answered
+    attributes:
+      label: What Bullpen answered
+      description: Include the citations it gave.
+    validations:
+      required: true
+  - type: textarea
+    id: correct
+    attributes:
+      label: What is actually true
+      description: A page that says so, if there is one.
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Source
+      description: The market tool, symbol, or news story the answer should have come from.
