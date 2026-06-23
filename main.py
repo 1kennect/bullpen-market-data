@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 from langchain.tools import tool
 from langchain_groq import ChatGroq
 from langchain.agents import create_agent
+import argparse
 
 
 load_dotenv()
@@ -31,8 +32,13 @@ def run_question(question: str):
 
 
 def main():
-    result = run_question("What's the weather in Tucson Arizona?")
-    print(result["messages"][-1].content)
+    parser = argparse.ArgumentParser(description="Ask the weather agent")
+    parser.add_argument("--city", default="Tucson Arizona")
+    args = parser.parse_args()
+    result = run_question(f"What's the weather in {args.city}?")
+    for message in result["messages"]:
+        print(type(message).__name__,
+              getattr(message, "tool_calls", None), message.content)
 
 
 if __name__ == "__main__":
