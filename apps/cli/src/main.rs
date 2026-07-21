@@ -1,0 +1,108 @@
+//! The bullpen developer console: runs units, streams logs, and probes services in one TUI.
+
+mod app;
+mod core;
+mod units;
+
+use std::time::Duration;
+
+use crossterm::event::{Event as TermEvent, EventStream, KeyEventKind};
+use futures::StreamExt;
+use tokio::sync::mpsc;
+
+use crate::app::App;
+use crate::core::types::Event;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()?;
+    let root = core::config::repo_root(&cwd).ok_or_else(|| {
+        anyhow::anyhow!(
+            "run from inside the Bullpen repo (no justfile found above {})",
+            cwd.display()
+        )
+    })?;
+    if let Err(e) = dotenvy::from_path(root.join(".env"))
+        && !e.not_found()
+    {
+        return Err(anyhow::anyhow!(".env: {e}"));
+    }
+    let cfg = core::config::load()?;
+    let targets = units::health::Targets::from_config(&cfg);
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
+    let mut app = App::new(cfg, root.clone(), &tx)?;
+
+    tokio::spawn(units::health::poll(targets, tx.clone()));
+    tokio::spawn(units::sandbox::poll(app.sandbox.clone(), tx.clone()));
+    tokio::spawn(services_task(root, tx.clone()));
+    tokio::spawn(ticker(tx.clone()));
+    tokio::spawn(keys(tx));
+
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        ratatui::restore();
+        original_hook(info);
+    }));
+    let mut terminal = ratatui::init();
+    let outcome = run(&mut terminal, &mut app, &mut rx).await;
+    app.shutdown();
+    ratatui::restore();
+    outcome
+}
+
+async fn run(
+    terminal: &mut ratatui::DefaultTerminal,
+    app: &mut App,
+    rx: &mut mpsc::UnboundedReceiver<Event>,
+) -> anyhow::Result<()> {
+    terminal.draw(|f| app::ui::draw(f, app))?;
+    while let Some(event) = rx.recv().await {
+        app.handle(event);
+        // Drains every queued event before the next redraw.
+        while let Ok(more) = rx.try_recv() {
+            app.handle(more);
+        }
+        if app.should_quit {
+            break;
+        }
+        terminal.draw(|f| app::ui::draw(f, app))?;
+    }
+    Ok(())
+}
+
+async fn ticker(tx: mpsc::UnboundedSender<Event>) {
+    let mut interval = tokio::time::interval(Duration::from_millis(500));
+    loop {
+        interval.tick().await;
+        if tx.send(Event::Tick).is_err() {
+            return;
+        }
+    }
+}
+
+async fn keys(tx: mpsc::UnboundedSender<Event>) {
+    let mut stream = EventStream::new();
+    while let Some(event) = stream.next().await {
+        let mapped = match event {
+            Ok(TermEvent::Key(k)) if k.kind == KeyEventKind::Press => Event::Key(k),
+            Ok(TermEvent::Resize(_, _)) => Event::Resize,
+            Ok(_) => continue,
+            // Losing the keyboard shuts the console down.
+            Err(e) => Event::InputLost(e.to_string()),
+        };
+        if tx.send(mapped).is_err() {
+            return;
+        }
+    }
+}
+
+async fn services_task(root: std::path::PathBuf, tx: mpsc::UnboundedSender<Event>) {
+    loop {
+        let states = units::runner::Runner::service_states(&root).await;
+        if tx.send(Event::Services(states)).is_err() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
+}
