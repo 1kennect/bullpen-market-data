@@ -1,0 +1,140 @@
+"""eval run, eval compare, eval baseline."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import typer
+from rich import print as rprint
+from rich.table import Table
+
+from evals import runner
+from evals.core.settings import settings
+from evals.core.types import CaseResult, EvalReport, RunnerError, SuiteReport
+from evals.suites import SUITES
+
+app = typer.Typer(no_args_is_help=True)
+
+
+def _wanted(suite: list[str] | None) -> set[str]:
+    """The suites to run, all when none are named. Rejects a name that is not registered."""
+    unknown = sorted(set(suite or ()) - set(SUITES))
+    if unknown:
+        raise typer.BadParameter(
+            f"unknown suite {', '.join(unknown)}; known: {', '.join(SUITES)}", param_hint="--suite"
+        )
+    return set(suite or SUITES)
+
+
+def _report(results: list[CaseResult], engine_url: str, case_count: int) -> EvalReport:
+    suites = []
+    for name in SUITES:
+        rs = [r for r in results if r.suite == name]
+        if rs:
+            suites.append(
+                SuiteReport(suite=name, passed=sum(r.score.passed for r in rs), total=len(rs))
+            )
+    return EvalReport(engine_url=engine_url, cases=case_count, results=results, suites=suites)
+
+
+def _print(report: EvalReport) -> None:
+    table = Table(title=f"evals against {report.engine_url}")
+    table.add_column("suite")
+    table.add_column("passed", justify="right")
+    table.add_column("rate", justify="right")
+    for s in report.suites:
+        table.add_row(s.suite, f"{s.passed}/{s.total}", f"{s.rate:.0%}")
+    rprint(table)
+    for r in report.results:
+        if not r.score.passed:
+            rprint(f"  [red]FAIL[/red] {r.suite} · {r.case_id}: {r.score.detail}")
+
+
+@app.callback()
+def main() -> None:
+    """Engine evals with a baseline gate."""
+
+
+@app.command("run")
+def run_cmd(
+    suite: list[str] = typer.Option(None, "--suite", help="Suites to run; default all."),
+    out: Path = typer.Option(None, help="Defaults under .bullpen/evals."),
+    engine_url: str = typer.Option(None, help="Defaults to BULLPEN_EVALS__ENGINE_URL."),
+) -> None:
+    """Run the golden cases against a live engine and score them."""
+    out = out or settings().evals.eval_report_path
+    wanted = _wanted(suite)
+    try:
+        cases = [c for c in runner.load_cases() if wanted & set(c.suites)]
+    except RunnerError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from e
+    results: list[CaseResult] = []
+    for case in cases:
+        try:
+            turns = runner.run_case(case, engine_url)
+        except RunnerError as e:
+            typer.echo(f"case {case.id}: {e}", err=True)
+            raise typer.Exit(1) from e
+        for name in case.suites:
+            if name not in wanted:
+                continue
+            score = SUITES[name](case, turns)
+            if score is None:
+                continue
+            results.append(
+                CaseResult(
+                    case_id=case.id, suite=name, score=score, request_id=turns[-1].request_id
+                )
+            )
+    report = _report(results, engine_url or settings().evals.engine_url, len(cases))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(report.model_dump_json(indent=2))
+    _print(report)
+    rprint(f"report → {out}")
+
+
+@app.command("baseline")
+def baseline_cmd(src: Path = typer.Option(None)) -> None:
+    """Promote the last report suite rates to the committed baseline."""
+    src = src or settings().evals.eval_report_path
+    report = EvalReport.model_validate_json(src.read_text())
+    baseline = {s.suite: {"passed": s.passed, "total": s.total} for s in report.suites}
+    path = settings().evals.baseline_path
+    path.write_text(json.dumps(baseline, indent=2) + "\n")
+    rprint(f"baseline → {path}")
+
+
+@app.command("compare")
+def compare_cmd(
+    src: Path = typer.Option(None),
+    tolerance: float = typer.Option(0.0, help="Allowed drop in pass rate per suite."),
+) -> None:
+    """Fail when any suite pass rate fell below the baseline."""
+    src = src or settings().evals.eval_report_path
+    path = settings().evals.baseline_path
+    if not path.exists():
+        typer.echo(f"no baseline at {path}; run `eval run` then `eval baseline` first", err=True)
+        raise typer.Exit(1)
+    baseline = json.loads(path.read_text())
+    report = EvalReport.model_validate_json(src.read_text())
+    regressions = []
+    now = {s.suite: s for s in report.suites}
+    # A suite in the baseline and missing from the report is a regression.
+    for name in sorted(set(now) | set(baseline)):
+        b = baseline.get(name)
+        s = now.get(name)
+        if s is None:
+            regressions.append(f"{name}: in the baseline but not in this report")
+            continue
+        if not b or not b["total"]:
+            rprint(f"  [yellow]{name}[/yellow]: not in baseline, not compared")
+            continue
+        before = b["passed"] / b["total"]
+        if s.rate + tolerance < before:
+            regressions.append(f"{name}: {before:.0%} → {s.rate:.0%}")
+    if regressions:
+        rprint("[red]regressions:[/red] " + "; ".join(regressions))
+        raise typer.Exit(1)
+    rprint("[green]no regressions against baseline[/green]")

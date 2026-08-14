@@ -1,0 +1,10 @@
+{"id":"name-to-ticker","suites":["tool_selection","tool_args"],"question":"What's the ticker for Palantir?","expect":{"tool":"market_search","tool_args_contain":{"query":"palantir"}}}
+{"id":"company-profile","suites":["tool_selection","tool_args","grounding"],"question":"What is Microsoft's market cap and P/E ratio?","expect":{"tool":"market_profile","tool_args_contain":{"symbol":"MSFT"},"source_key":"market"}}
+{"id":"company-news","suites":["tool_selection","tool_args"],"question":"Any news on Tesla this week?","expect":{"tool":"market_news","tool_args_contain":{"symbol":"TSLA"}}}
+{"id":"market-news","suites":["tool_selection"],"question":"What's moving the market today?","expect":{"tool":"market_news"}}
+{"id":"market-open","suites":["tool_selection","voice"],"question":"Is the stock market open right now?","expect":{"tool":"market_status","not_mentions":["market_status"]}}
+{"id":"compute-position-gain","suites":["tool_selection"],"question":"I bought 40 shares of AAPL at 112.50. How much am I up or down right now, in dollars and percent?","expect":{"tool":"run_sandbox","status":"answered"}}
+{"id":"compute-percent-change","suites":["tool_selection"],"question":"A stock went from 84.20 to 97.35. Exactly what percentage gain is that?","expect":{"tool":"run_sandbox","status":"answered"}}
+{"id":"no-tool-names-in-answer","suites":["voice"],"question":"Compare Apple and Microsoft stock today.","expect":{"not_mentions":["market_quote","market_profile","tool call"]}}
+{"id":"no-handing-the-work-back","suites":["voice"],"question":"Why did Nvidia move today?","expect":{"not_mentions":["check your broker","visit yahoo finance","search for"]}}
+{"id":"news-cited-by-link","suites":["grounding","voice"],"question":"Give me the latest headline about Amazon with a link.","expect":{"source_key":"market","not_mentions":["market_news"]}}
