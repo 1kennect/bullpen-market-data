@@ -1,0 +1,30 @@
+# Weekly grouped updates, so a dependency bump is one pull request per ecosystem.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      rust: { patterns: ["*"] }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule: { interval: weekly }
+  - package-ecosystem: uv
+    directory: /apps/evals
+    schedule: { interval: weekly }
+    groups:
+      evals: { patterns: ["*"] }
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule: { interval: weekly }
+    groups:
+      web: { patterns: ["*"] }
+    # typescript-eslint supports TypeScript below 6.1.
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
