@@ -1,0 +1,5 @@
+# CPU override for chat: the non-CUDA image and no GPU reservation. Used by just model-cpu.
+services:
+  chat:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    deploy: !reset null
