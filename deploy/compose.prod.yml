@@ -1,0 +1,19 @@
+# Production override: GHCR images, no builds, only the engine port published.
+services:
+  engine:
+    build: !reset null
+    image: ghcr.io/${BULLPEN_IMAGE_OWNER:?set BULLPEN_IMAGE_OWNER to the GitHub owner CD pushes to}/bullpen-rust:${BULLPEN_IMAGE_TAG:-main}
+    environment:
+      # The engine refuses to boot without its sandbox.
+      BULLPEN_SANDBOX__REQUIRED: "true"
+  store:
+    build: !reset null
+    image: ghcr.io/${BULLPEN_IMAGE_OWNER:?set BULLPEN_IMAGE_OWNER to the GitHub owner CD pushes to}/bullpen-rust:${BULLPEN_IMAGE_TAG:-main}
+  postgres:
+    ports: !reset []
+  discord:
+    build: !reset null
+    image: ghcr.io/${BULLPEN_IMAGE_OWNER:?set BULLPEN_IMAGE_OWNER to the GitHub owner CD pushes to}/bullpen-rust:${BULLPEN_IMAGE_TAG:-main}
+  # Phoenix has no authentication and is reached over a tunnel.
+  phoenix:
+    ports: !reset []

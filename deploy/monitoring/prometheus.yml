@@ -1,0 +1,16 @@
+# Scrapes llama-server, the GPU exporter, and Prometheus itself.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: chat
+    static_configs:
+      - targets: ["chat:8000"]
+  # Up only under the gpu-metrics profile.
+  - job_name: gpu
+    static_configs:
+      - targets: ["gpu-exporter:9835"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

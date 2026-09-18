@@ -1,0 +1,192 @@
+# Memory ceilings are overridable with BULLPEN_MEM_<SERVICE> in .env. sandboxd bounds all run_sandbox containers.
+# store holds conversations, memories, the profile graph and confirmations on postgres; engine and
+# store share BULLPEN_STORE__TOKEN from .env. Market data comes from Finnhub with BULLPEN_MARKET__API_KEY.
+services:
+  engine:
+    build: { context: .., dockerfile: deploy/docker/rust.Dockerfile }
+    mem_limit: ${BULLPEN_MEM_ENGINE:-1g}
+    entrypoint: ["/engine"]
+    env_file:
+      - { path: ../.env, required: false }
+    environment:
+      BULLPEN_MODEL__BASE_URL: http://chat:8000/v1
+      BULLPEN_TELEMETRY__PHOENIX_URL: ${BULLPEN_PHOENIX_URL:-}
+      BULLPEN_STORE__URL: http://store:8090
+      # run_sandbox uses the sandboxd daemon.
+      DOCKER_HOST: tcp://sandboxd:2375
+    ports: ["8080:8080"]
+    depends_on:
+      sandboxd: { condition: service_started }
+      store: { condition: service_healthy }
+    restart: unless-stopped
+
+  # Conversations, memories, the profile graph and confirmations over HTTP, reachable only inside
+  # the compose network. Applies its migrations at boot.
+  store:
+    build: { context: .., dockerfile: deploy/docker/rust.Dockerfile }
+    mem_limit: ${BULLPEN_MEM_STORE:-256m}
+    entrypoint: ["/store"]
+    env_file:
+      - { path: ../.env, required: false }
+    environment:
+      BULLPEN_STORE__BIND: 0.0.0.0:8090
+      BULLPEN_STORE__DATABASE_URL: postgres://bullpen:${BULLPEN_POSTGRES_PASSWORD:?set BULLPEN_POSTGRES_PASSWORD in .env}@postgres:5432/bullpen
+      BULLPEN_TELEMETRY__PHOENIX_URL: ${BULLPEN_PHOENIX_URL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8090/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  postgres:
+    image: mirror.gcr.io/library/postgres:17-bookworm
+    mem_limit: ${BULLPEN_MEM_POSTGRES:-512m}
+    environment:
+      POSTGRES_USER: bullpen
+      POSTGRES_DB: bullpen
+      POSTGRES_PASSWORD: ${BULLPEN_POSTGRES_PASSWORD:?set BULLPEN_POSTGRES_PASSWORD in .env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bullpen -d bullpen"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Container runtime for run_sandbox, reachable only inside the compose network.
+  sandboxd:
+    image: mirror.gcr.io/library/docker:27-dind
+    mem_limit: ${BULLPEN_MEM_SANDBOXD:-5g}
+    privileged: true
+    command: ["dockerd", "--host=tcp://0.0.0.0:2375", "--tls=false"]
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    volumes: [sandboxdata:/var/lib/docker]
+    restart: unless-stopped
+
+  discord:
+    build: { context: .., dockerfile: deploy/docker/rust.Dockerfile }
+    mem_limit: ${BULLPEN_MEM_DISCORD:-256m}
+    entrypoint: ["/discord"]
+    env_file:
+      - { path: ../.env, required: false }
+    environment:
+      BULLPEN_ENGINE__BASE_URL: http://engine:8080
+      BULLPEN_TELEMETRY__PHOENIX_URL: ${BULLPEN_PHOENIX_URL:-}
+    depends_on: [engine]
+    restart: unless-stopped
+
+  # One llama-server per model. Started by just model.
+  chat:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    mem_limit: ${BULLPEN_MEM_CHAT:-8g}
+    profiles: [model]
+    command:
+      - -hf
+      - ${BULLPEN_CHAT_GGUF:-Qwen/Qwen3-4B-GGUF:Q4_K_M}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      # Total across slots; each slot gets ctx-size divided by parallel.
+      - --ctx-size
+      - ${BULLPEN_CHAT_CTX:-16384}
+      - --parallel
+      - ${BULLPEN_CHAT_PARALLEL:-2}
+      # 8-bit KV cache with flash attention.
+      - --cache-type-k
+      - ${BULLPEN_CHAT_KV_TYPE:-q8_0}
+      - --cache-type-v
+      - ${BULLPEN_CHAT_KV_TYPE:-q8_0}
+      - --flash-attn
+      - "on"
+      - --n-gpu-layers
+      - ${BULLPEN_CHAT_NGL:-99}
+      - --jinja
+      - --metrics
+    volumes: [modelcache:/root/.cache/llama.cpp]
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - { driver: nvidia, count: 1, capabilities: [gpu] }
+    restart: unless-stopped
+
+  # Trace UI on localhost:6006, without authentication. Started by just phoenix.
+  phoenix:
+    image: mirror.gcr.io/arizephoenix/phoenix:version-20.11.0
+    mem_limit: ${BULLPEN_MEM_PHOENIX:-2g}
+    profiles: [phoenix]
+    environment:
+      PHOENIX_WORKING_DIR: /data
+    volumes: [phoenixdata:/data]
+    ports: ["127.0.0.1:6006:6006"]
+    restart: unless-stopped
+
+  # llama-server metrics on localhost:9090.
+  prometheus:
+    image: mirror.gcr.io/prom/prometheus:v3.1.0
+    mem_limit: ${BULLPEN_MEM_PROMETHEUS:-1g}
+    profiles: [metrics]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports: ["127.0.0.1:9090:9090"]
+    restart: unless-stopped
+
+  # Dashboards over Prometheus on localhost:3000.
+  grafana:
+    image: mirror.gcr.io/grafana/grafana:11.5.1
+    mem_limit: ${BULLPEN_MEM_GRAFANA:-256m}
+    profiles: [metrics]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${BULLPEN_GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+  # GPU utilization and VRAM from nvidia-smi; needs a GPU.
+  gpu-exporter:
+    image: mirror.gcr.io/utkuozdemir/nvidia_gpu_exporter:1.3.2
+    mem_limit: ${BULLPEN_MEM_GPU_EXPORTER:-128m}
+    profiles: [gpu-metrics]
+    # nvidia-smi runs under the utility capability from the nvidia runtime.
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    ports: ["127.0.0.1:9835:9835"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - { driver: nvidia, count: 1, capabilities: [gpu, utility] }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  modelcache:
+  phoenixdata:
+  promdata:
+  sandboxdata:
+  grafanadata:
