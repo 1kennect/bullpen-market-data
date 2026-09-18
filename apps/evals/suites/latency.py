@@ -1,0 +1,14 @@
+"""Wall-clock per turn stays under the case budget."""
+
+from __future__ import annotations
+
+from evals.core.types import EvalCase, Score, TurnResult
+
+
+def score(case: EvalCase, turns: list[TurnResult]) -> Score | None:
+    """Passes when the slowest turn is within the case budget; None without a budget."""
+    limit = case.expect.max_latency_ms
+    if limit is None:
+        return None
+    worst = max(t.latency_ms for t in turns)
+    return Score(passed=worst <= limit, detail=f"{worst} ms vs {limit} ms budget")

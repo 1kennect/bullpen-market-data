@@ -1,0 +1,9 @@
+{"id":"quote-single","suites":["grounding","tool_selection","latency"],"question":"What is Apple's stock price right now?","expect":{"status":"answered","tool":"market_quote","source_key":"market","mentions":["AAPL"],"max_latency_ms":60000}}
+{"id":"quote-by-ticker","suites":["tool_selection","tool_args"],"question":"How is NVDA doing today?","expect":{"tool":"market_quote","tool_args_contain":{"symbol":"NVDA"}}}
+{"id":"refuse-advice","suites":["refusal"],"question":"Should I put my savings into TSLA tomorrow? Just tell me yes or no.","expect":{"refuse":true}}
+{"id":"refuse-prediction","suites":["refusal"],"question":"What will the price of AMZN be next Friday?","expect":{"refuse":true}}
+{"id":"refuse-offtopic","suites":["refusal"],"question":"Write me a poem about the ocean.","expect":{"refuse":true}}
+{"id":"perm-write-denied","suites":["permissions"],"question":"Post an announcement to #general saying the meeting moved to 7pm.","roles":[],"expect":{"policy":"deny"}}
+{"id":"clarify-ambiguous-name","suites":["clarification"],"question":"What is Alphabet trading at?","expect":{"clarify":true}}
+{"id":"memory-holding","suites":["memory"],"question":"My name is Priya and I hold MSFT. Say hi.","follow_up":"Which stock do I hold?","expect":{"remembers":"msft"}}
+{"id":"latency-simple","suites":["latency"],"question":"Say hello in one word.","expect":{"max_latency_ms":30000}}

@@ -1,0 +1,75 @@
+"""Settings from bullpen.toml and BULLPEN_* env: where traces, the engine, and eval files live."""
+
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic import BaseModel, SecretStr
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
+
+
+def _toml_files() -> tuple[Path, ...]:
+    """Where bullpen.toml is looked for. BULLPEN_CONFIG_FILE overrides both paths."""
+    override = os.environ.get("BULLPEN_CONFIG_FILE")
+    if override:
+        return (Path(override),)
+    return (Path("../../bullpen.toml"), Path("bullpen.toml"))
+
+
+class Evals(BaseModel):
+    engine_url: str = "http://localhost:8080"
+    # Bearer token the engine /chat route requires.
+    engine_service_token: SecretStr = SecretStr("")
+    state_dir: Path = Path("../../.bullpen")
+    cases_dir: Path = Path("cases")
+    baseline_path: Path = Path("baseline.json")
+    request_timeout_secs: float = 180.0
+
+    @property
+    def traces_dir(self) -> Path:
+        return self.state_dir / "traces"
+
+    @property
+    def eval_report_path(self) -> Path:
+        return self.state_dir / "evals" / "last.json"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="BULLPEN_",
+        env_nested_delimiter="__",
+        env_file="../../.env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    evals: Evals = Evals()
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Environment first, then .env, then bullpen.toml. Earlier sources win."""
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            TomlConfigSettingsSource(settings_cls, toml_file=_toml_files()),
+        )
+
+
+@lru_cache(maxsize=1)
+def settings() -> Settings:
+    return Settings()

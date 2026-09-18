@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Runs every unit on demand.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # A unit's job runs only when that unit or its shared tooling changed.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.rust == 'true' }}
+      web: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.web == 'true' }}
+      python: ${{ steps.python.outputs.pkgs }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            shared: &shared
+              - justfile
+              - .github/workflows/ci.yml
+              - bullpen.toml
+            rust:
+              - *shared
+              - apps/engine/**
+              - apps/store/**
+              - apps/discord/**
+              - apps/cli/**
+              - Cargo.toml
+              - Cargo.lock
+              - scripts/check-deps.sh
+            web:
+              - *shared
+              - apps/web/**
+            evals:
+              - *shared
+              - apps/evals/**
+      - id: python
+        env:
+          ALL: ${{ github.event_name == 'workflow_dispatch' }}
+          EVALS: ${{ steps.filter.outputs.evals }}
+        run: |
+          pkgs=()
+          { [ "$EVALS" = true ] || [ "$ALL" = true ]; } && pkgs+=(evals)
+          echo "pkgs=$(printf '%s\n' "${pkgs[@]}" | jq -Rc 'select(length>0)' | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    # The store tests run against this database.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: bullpen
+          POSTGRES_PASSWORD: bullpen
+          POSTGRES_DB: store_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bullpen -d store_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      BULLPEN_STORE_TEST_DATABASE_URL: postgres://bullpen:bullpen@localhost:5432/store_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
+      - run: just check-rust
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - uses: extractions/setup-just@v4
+      - run: cd apps/web && npm ci
+      - run: just check-web
+
+  python:
+    needs: changes
+    if: needs.changes.outputs.python != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: ${{ fromJSON(needs.changes.outputs.python) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - uses: extractions/setup-just@v4
+      - run: cd apps/${{ matrix.pkg }} && uv sync --extra dev
+      - run: just check-${{ matrix.pkg }}

@@ -1,0 +1,35 @@
+# Dependency pull requests stay disabled in the two-branch test repository.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    open-pull-requests-limit: 0
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      rust: { patterns: ["*"] }
+  - package-ecosystem: github-actions
+    open-pull-requests-limit: 0
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
+  - package-ecosystem: docker
+    open-pull-requests-limit: 0
+    directory: /deploy
+    schedule: { interval: weekly }
+  - package-ecosystem: uv
+    open-pull-requests-limit: 0
+    directory: /apps/evals
+    schedule: { interval: weekly }
+    groups:
+      evals: { patterns: ["*"] }
+  - package-ecosystem: npm
+    open-pull-requests-limit: 0
+    directory: /apps/web
+    schedule: { interval: weekly }
+    groups:
+      web: { patterns: ["*"] }
+    # typescript-eslint supports TypeScript below 6.1.
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
