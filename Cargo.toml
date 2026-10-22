@@ -25,7 +25,7 @@ schemars = "1"
 secrecy = { version = "0.10", features = ["serde"] }
 
 # llm / agents
-rig-core = "0.42"
+rig-core = "0.44"
 rmcp = { version = "3", features = ["client", "transport-child-process", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
 
 # interfaces
@@ -36,7 +36,7 @@ tower-http = { version = "0.7", features = ["trace", "cors", "timeout"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
 
 # storage
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
 
 # config
 figment = { version = "0.10", features = ["env", "toml"] }
